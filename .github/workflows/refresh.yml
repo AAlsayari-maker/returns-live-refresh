@@ -1,20 +1,22 @@
 name: refresh-returns-live
 
-# Runs the التذاكر live refresh every 5 minutes in GitHub's cloud (no PC needed).
-# NOTE: GitHub's scheduler is best-effort — runs can be delayed several minutes under load.
+# GitHub's scheduler is best-effort and can't be forced to run every few minutes.
+# Workaround: each triggered run LOOPS internally — refreshing every 3 minutes for ~55
+# minutes — so GitHub only has to fire the job about once an hour (reliable), while the
+# sheet updates every ~3 minutes. Public repo => the extra minutes are unlimited and free.
 on:
   schedule:
-    - cron: "*/5 * * * *"
-  workflow_dispatch:            # lets you trigger a run manually from the Actions tab
+    - cron: "*/15 * * * *"       # heartbeat: only needs to land ~once per 55-min loop
+  workflow_dispatch:             # manual "Run workflow" button
 
-concurrency:                    # never let two refreshes overlap
+concurrency:                     # one loop at a time; a new trigger queues and hands off seamlessly
   group: refresh-returns-live
   cancel-in-progress: false
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 62
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,10 +24,21 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Run refresh
+      - name: Refresh loop (every 3 min for ~55 min)
         env:
           METABASE_URL: ${{ secrets.METABASE_URL }}
           METABASE_API_KEY: ${{ secrets.METABASE_API_KEY }}
           SHEETS_CLIENT_EMAIL: ${{ secrets.SHEETS_CLIENT_EMAIL }}
           SHEETS_PRIVATE_KEY: ${{ secrets.SHEETS_PRIVATE_KEY }}
-        run: python refresh_live_dates.py
+        run: |
+          end=$((SECONDS + 3300))          # loop for 55 minutes
+          i=0
+          while :; do
+            i=$((i + 1))
+            echo "::group::refresh #$i"
+            python refresh_live_dates.py || echo "run #$i failed — continuing loop"
+            echo "::endgroup::"
+            [ "$SECONDS" -ge "$end" ] && break
+            sleep 180                       # 3 minutes between refreshes
+          done
+          echo "loop finished after $i refreshes"
