@@ -1,0 +1,6 @@
+# NEVER commit secrets or local artifacts
+.env
+.env.local
+*.log
+__pycache__/
+*.pyc
