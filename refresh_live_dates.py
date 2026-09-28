@@ -125,7 +125,9 @@ sc = SheetsClient(env.get("SHEETS_CLIENT_EMAIL"), env.get("SHEETS_PRIVATE_KEY"))
 mb = MetabaseClient(env.get("METABASE_URL"), env.get("METABASE_API_KEY"))
 
 # ---- resolve columns by header
-grid = sc.read(SID, f"{TAB}!A2:AZ400", unformatted=False)
+# open-ended range: the tab grows past 400 rows (a fixed A2:AZ400 made rows 401+ look "new"
+# every run, resetting their manual تصنيف خطأ / ignoring their id القطعة — fixed 2026-09-28)
+grid = sc.read(SID, f"{TAB}!A2:AZ", unformatted=False)
 header = grid[0]
 col = {name: header.index(name) for name in (H_TICKET, H_ITEM, H_CREATE, H_DELIV, H_DIFF)}
 for opt in (H_CAUSE, H_ACCEPT_MADE, H_ACCEPT_STAT, H_TAG14, H_SUPPLIER, H_CENTER,
@@ -479,8 +481,13 @@ if H_SUPPLIER in col:
     put(col[H_SUPPLIER], SU)
 if H_CENTER in col:
     put(col[H_CENTER], CT)
-if H_ERRCLASS in col:
-    put(col[H_ERRCLASS], EC)
+if H_ERRCLASS in col:              # write ONLY cells that were empty — never rewrite a staff choice
+    EL = col_letter(col[H_ERRCLASS])  # (the website edits this column; a whole-column write could
+    fill = [{"range": f"{TAB}!{EL}{row}", "values": [[ERRCLASS_DEFAULT]]}   # clobber a fresh edit)
+            for row, _, _ in rows_info if not cur_errclass.get(row)]
+    if fill:
+        sc.svc.spreadsheets().values().batchUpdate(spreadsheetId=SID, body={
+            "valueInputOption": "RAW", "data": fill}).execute()
 if H_WAYBILL in col:
     put(col[H_WAYBILL], WB)
 if H_STATUS in col:                 # الحالة refreshed for all rows
